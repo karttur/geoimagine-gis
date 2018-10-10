@@ -1,0 +1,9 @@
+"""
+Postgres connection for karttur Geo Imagine Framework
+
+Author
+______
+Thomas Gumbricht
+"""
+from .version import __version__, VERSION
+from .mj_gis_v80 import MjProj, ESRIOpenGetLayer
