@@ -462,10 +462,10 @@ class VectorLayer:
         else:
             exitstr = 'Can not recoginze geometry type %s for creating layer' %(self.geomtype) 
             print (exitstr)
-            BALLE
+            ERRORCHECK
             sys.exit(exitstr)
         if self.layer is None:
-            BALLE
+            ERRORCHECK
             print ( 'Could not create layer' )
             sys.exit() 
             
@@ -488,7 +488,7 @@ class VectorLayer:
             else:
                 printstr =  'field type not recognized %s' %(fieldDef.type) 
                 print (printstr)
-                BALLE           
+                ERRORCHECK           
             self.layer.CreateField(new_field)
         else:
             for i in range( self.layerDefn.GetFieldCount() ):
@@ -503,7 +503,7 @@ class VectorLayer:
                         sys.exit('Existing field of different type already exists')
          
     def AddField(self,f):
-        FITTA
+        ERRORCHECK
               
     def FillAllFields(self,fieldDefL,keyfield):
         for f in fieldDefL:
@@ -811,7 +811,7 @@ def RasterOpenGetFirstLayer(srcRastFPN,modeD):
         #set the datasource of the layer
         srcLayer.SetDS(srcDS)
     elif modeD['mode'] == 'edit':
-        print (BALLE)
+        print (ERRORCHECK)
         srcDS.OpenGDALEdit(srcRastFPN)
         srcLayer = RasterLayer()
         srcLayer.SetDS(srcDS)
@@ -981,7 +981,7 @@ def SetRasterMeta(srcRasterFPN,*args,**kwargs):
                 srcLayer.ColorTable(palette.colortable)
     #srcLayer.CloseLayer()
     srcDS.CloseDS()
-    BALLE
+    ERRORCHECK
         
 def GetFeatureAttributeList(srcShpFPN, fieldL, idfield):
     #Get all fields
@@ -1341,7 +1341,7 @@ def CreateEmptyVectorDS(tarShpFPN, fieldDefL, proj_cs, layerid, ogrtype):
         spatialRef.SetFromEPSG(4326)
         #Create the shapefile
         tarDS,tarLayer = ESRICreateDSLayer(tarShpFPN, spatialRef.proj_cs, 'point', layerid, fieldDefL)
-    fittan h       
+    ERRORCHECKn h       
     ptDL = ConvertPtLHdrToDict(ptL, headerL)
     tarLayer.AddPtDataFromDict('lon','lat',ptDL)
     tarDS.CloseDS()

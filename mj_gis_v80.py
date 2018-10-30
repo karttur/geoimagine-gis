@@ -605,7 +605,7 @@ def ExtractFeaturesToNewDS(srcShpFPN,tarShpFPN,fieldname,valueLL,fieldDefL = Fal
 def ImportKMLtoShape(kmlFPN,shpFPN):
     oscmd = '/Library/Frameworks/GDAL.framework/Versions/2.1/Programs/ogr2ogr -skipfailures %(dst)s %(src)s' %{'dst':shpFPN, 'src':kmlFPN}
 
-    BALLE
+    ERRORCHECK
     
 def ExportToGeoJson(srcFPN,dstFPN):
     features = []
