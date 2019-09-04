@@ -40,8 +40,6 @@ class RasterPalette():
         self.paletteT = paletteT
         self.FixGDALPalette()
         ct = gdal.ColorTable() 
-        for row in self.PcR:
-            pass
 
         for c in range(1,len(self.PcR)):
             ct.CreateColorRamp(self.PcR[c-1][0],self.PcR[c-1][1],self.PcR[c][0],self.PcR[c][1])
@@ -70,7 +68,6 @@ class RasterPalette():
         self.PcR = PcR
         self.AT = AT
         self.maxAT = self.paletteT[c][0]
-        #return PcR,AT,paletteT[c][0]
         
 class FieldDef():
     def __init__(self, name,fieldDefD):
@@ -136,10 +133,11 @@ class MjProj:
  
     def ReadSpatialRef(self):
         self.SetProj4()
-        print (self.proj4)
-        print (self.proj_cs)
+
         self.SetFromProj4(self.proj4)
-        print (self.proj_cs)
+        if self.proj_cs.GetAttrValue("AUTHORITY", 1) == None:
+            self.epsg = False
+            return
         self.epsg = int( self.proj_cs.GetAttrValue("AUTHORITY", 1) )
         self.spatialunit = self.proj_cs.GetAttrValue("UNIT", 0)
         self.datum = self.proj_cs.GetAttrValue("DATUM", 0)
@@ -161,6 +159,7 @@ class MjProj:
 class RasterDataSource: 
     def __init__(self):
         """The constructoris just an empty container.""" 
+        pass
         
     def OpenGDALRead(self,FPN): 
         self.rasterFPN = FPN
@@ -187,59 +186,34 @@ class RasterDataSource:
     def CreateGDALraster(self,FPN,layer,of = 'GTiff'):
         #self.datasource = gdal.GetDriverByName('GTiff').Create(FPN, x_res, y_res, 1, gdal.GDT_Byte)
         driver = gdal.GetDriverByName( of )
-        #metadata = driver.GetMetadata()
-        #if metadata.has_key(gdal.DCAP_CREATE) \
-        #    and metadata[gdal.DCAP_CREATE] == 'YES':
         if layer.comp.celltype.lower() in ['byte','uint8']:
-            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Byte )   
+            self.datasource = driver.Create( FPN, layer.layer.cols, layer.layer.lins, 1, gdal.GDT_Byte )   
             layer.comp.cellnull = int(layer.comp.cellnull) 
         elif layer.comp.celltype.lower() == 'int16':  
-            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Int16 ) 
+            self.datasource = driver.Create( FPN, layer.layer.cols, layer.layer.lins, 1, gdal.GDT_Int16 ) 
             layer.comp.cellnull = int(layer.comp.cellnull)
         elif layer.comp.celltype.lower() == 'uint16':
-            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_UInt16 )
+            self.datasource = driver.Create( FPN, layer.layer.cols, layer.layer.lins, 1, gdal.GDT_UInt16 )
             layer.comp.cellnull = int(layer.comp.cellnull)
         elif layer.comp.celltype.lower() == 'float32':
-            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Float32 )
+            self.datasource = driver.Create( FPN, layer.layer.cols, layer.layer.lins, 1, gdal.GDT_Float32 )
             layer.comp.cellnull = float(layer.comp.cellnull)
         else:
             exitstr ='numpy type not defined',layer.comp.celltype
             sys.exit(exitstr) 
-        self.datasource.SetGeoTransform( layer.geotrans )
-        self.datasource.SetProjection( layer.projection  ) 
-        if hasattr(layer.comp,'palette') and layer.comp.palette:
+        self.datasource.SetGeoTransform( layer.layer.geotrans )
+        self.datasource.SetProjection( layer.layer.projection  ) 
+        if hasattr(layer.comp,'palette') and layer.comp.colorRamp:
+
             palette = RasterPalette()
-            palette.SetTuplePalette(layer.comp.palette)
+            palette.SetTuplePalette(layer.comp.colorRamp)
             self.datasource.GetRasterBand(1).SetColorTable(palette.colortable) 
-        self.datasource.GetRasterBand(1).WriteArray( layer.BAND )
+        self.datasource.GetRasterBand(1).WriteArray( layer.layer.NPBAND )
         self.datasource.GetRasterBand(1).SetNoDataValue(layer.comp.cellnull)
-        '''
-            #PcR,AT,maxAT = self.FixGDALPalette(self.palette)
-            #ct = gdal.ColorTable() 
-            
-            For discrete colors
-            #ct.CreateColorRamp(0,(178,223,138),5,(255,127,0))
-            #ct.CreateColorRamp(Pcr)
-            for c in PcR:
+
+        #self.datasource.FlushCache()
+        #self.datasource = None
         
-                ct.SetColorEntry(c[0],c[1])
-        
-            #for color ramps
-            for c in range(1,len(PcR)):
-                ct.CreateColorRamp(PcR[c-1][0],PcR[c-1][1],PcR[c][0],PcR[c][1])
-            self.datasource.GetRasterBand(1).SetColorTable(ct) 
-        
-            rat = gdal.RasterAttributeTable()
-            rat.CreateColumn("Value", GFT_String, GFT_String)
-            for i in range(maxAT): 
-                rat.SetValueAsString(i, 0, AT[i])
-            self.datasource.GetRasterBand(1).SetDefaultRAT(rat)
-        '''
-        self.datasource.FlushCache()
-        self.datasource = None
-        #else:
-        #    print ( 'Driver %s does not supports CreateCopy() method.' % of )
- 
     def CreateGDALDS(self,FPN,layer,of = 'GTiff'):
         #self.datasource = gdal.GetDriverByName('GTiff').Create(FPN, x_res, y_res, 1, gdal.GDT_Byte)
         driver = gdal.GetDriverByName( of )
@@ -272,7 +246,7 @@ class RasterDataSource:
                 self.datasource.GetRasterBand(1).SetColorTable(ct)
                     
     def WriteBlock(self,col,row,arr):
-        self.datasource.GetRasterBand(1).WriteArray(arr,col, row)
+        self.datasource.GetRasterBand(1).WriteArray(arr, col, row)
         #self.datasource.GetRasterBand(1).WriteArray
  
     def arrTo2Dnp(self,layer):
@@ -297,6 +271,7 @@ class RasterDataSource:
             
     def CloseDS(self):
         #close the datasource
+        self.datasource.FlushCache()
         self.datasource = None
 
 class RasterLayer:
@@ -417,18 +392,8 @@ class VectorLayer:
         self.layer = self.datasource.GetLayer()
         self.layerid = self.layer.GetName()
 
-        print ('self.layerid',self.layerid)
-        print ('geomType', self.layer.GetGeomType() )
         self.geomtype = geomTypeD[self.layer.GetGeomType()]
-        '''
-        self.layerDef = self.layer.GetLayerDefn()
 
-        print ( self.layerDef.GetGeomType() )
-        
-        first_feat = self.layer.GetFeature(1)
-
-        self.geomtype = first_feat.geometry().GetGeometryName()
-        '''
         return self.GetLayerDef()
         
     def GetLayerDef(self):
@@ -462,10 +427,10 @@ class VectorLayer:
         else:
             exitstr = 'Can not recoginze geometry type %s for creating layer' %(self.geomtype) 
             print (exitstr)
-            ERRORCHECK
+            BALLE
             sys.exit(exitstr)
         if self.layer is None:
-            ERRORCHECK
+            BALLE
             print ( 'Could not create layer' )
             sys.exit() 
             
@@ -488,7 +453,7 @@ class VectorLayer:
             else:
                 printstr =  'field type not recognized %s' %(fieldDef.type) 
                 print (printstr)
-                ERRORCHECK           
+                BALLE           
             self.layer.CreateField(new_field)
         else:
             for i in range( self.layerDefn.GetFieldCount() ):
@@ -503,7 +468,7 @@ class VectorLayer:
                         sys.exit('Existing field of different type already exists')
          
     def AddField(self,f):
-        ERRORCHECK
+        FITTA
               
     def FillAllFields(self,fieldDefL,keyfield):
         for f in fieldDefL:
@@ -539,7 +504,6 @@ class VectorLayer:
             tarfeat.SetGeometry(geom.ogrGeom)
                     
             for key in D:  
-                print ('feature', key, D[key])
                 tarfeat.SetField(key, D[key])         
             self.layer.CreateFeature(tarfeat) 
        
@@ -771,7 +735,7 @@ def ESRICreateDSLayer(tarShpFPN,spatialRef,geomtype,layerid,fieldDefL):
         tarLayer.AddFieldDef(fieldDef)
     return tarDS, tarLayer  
 
-def ESRIOpenGetLayer(srcShpFPN,mode):
+def ESRIOpenGetLayer(srcShpFPN,mode='read'):
     '''Opens a standard ESRI datasource and gets the layer and layerDef
     '''
     #Create an instance of datasource for the source data
@@ -811,7 +775,6 @@ def RasterOpenGetFirstLayer(srcRastFPN,modeD):
         #set the datasource of the layer
         srcLayer.SetDS(srcDS)
     elif modeD['mode'] == 'edit':
-        print (ERRORCHECK)
         srcDS.OpenGDALEdit(srcRastFPN)
         srcLayer = RasterLayer()
         srcLayer.SetDS(srcDS)
@@ -824,14 +787,15 @@ def RasterOpenGetFirstLayer(srcRastFPN,modeD):
     return srcDS,srcLayer 
 
 def ReadRasterArray(srcRastFPN,readD):
-    srcDS,srcLayer = RasterOpenGetFirstLayer(srcRastFPN,readD['mode'])
+    srcDS,srcLayer = RasterOpenGetFirstLayer(srcRastFPN,readD)
     srcLayer.ReadBand()
-    srcDS.CloseDS()
-    return srcLayer.NPBAND
+    srcDS.CloseDS()    
+    return srcLayer
 
 def CreateDSWriteRasterArray(layer,writeD):
     tarDS = RasterDataSource()
-    tarDS.CreateGDALraster(layer.FPN,layer,writeD['of'])   
+    tarDS.CreateGDALraster(layer.FPN,layer,writeD['of'])  
+    tarDS.CloseDS() 
      
 def CreateESRIPolygonPtL(tarShpFPN, fieldDefL, ptL, proj_cs, layerid):
     #create the datasource
@@ -931,8 +895,6 @@ def ReplaceRasterDS(srcRasterFPN, *args, **kwargs):
         return
     #Get the celltype of the existing layer
     spatialRef,srcLayer = GetRasterMetaData(srcRasterFPN)
-    print ('cellType',srcLayer.cellType )
-
 
     changecelltype = anychange = False
     for key, value in kwargs.items():
@@ -970,7 +932,6 @@ def GetRasterMetaData(srcRasterFPN):
 
 def SetRasterMeta(srcRasterFPN,*args,**kwargs):
     srcDS,srcLayer = RasterOpenGetFirstLayer(srcRasterFPN,'edit')
-    print ( 'xsize', srcLayer.layer.XSize )
     if kwargs is not None:
         for key, value in kwargs.items():
             if key == 'cellnull' and value:
@@ -981,7 +942,7 @@ def SetRasterMeta(srcRasterFPN,*args,**kwargs):
                 srcLayer.ColorTable(palette.colortable)
     #srcLayer.CloseLayer()
     srcDS.CloseDS()
-    ERRORCHECK
+    BALLE
         
 def GetFeatureAttributeList(srcShpFPN, fieldL, idfield):
     #Get all fields
@@ -1341,7 +1302,7 @@ def CreateEmptyVectorDS(tarShpFPN, fieldDefL, proj_cs, layerid, ogrtype):
         spatialRef.SetFromEPSG(4326)
         #Create the shapefile
         tarDS,tarLayer = ESRICreateDSLayer(tarShpFPN, spatialRef.proj_cs, 'point', layerid, fieldDefL)
-    ERRORCHECKn h       
+    fittan h       
     ptDL = ConvertPtLHdrToDict(ptL, headerL)
     tarLayer.AddPtDataFromDict('lon','lat',ptDL)
     tarDS.CloseDS()

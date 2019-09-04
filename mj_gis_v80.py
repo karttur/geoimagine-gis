@@ -52,10 +52,12 @@ class MjProj:
             self.proj_cs.ImportFromEPSG(epsg)
  
     def ReadSpatialRef(self):
-        #print self.proj_cs
-        #print 'epsg',self.proj_cs.GetAttrValue("AUTHORITY", 1)
+
         self.SetProj4()
-        self.epsg = int( self.proj_cs.GetAttrValue("AUTHORITY", 1) )
+        self.epsg = None
+        if self.proj_cs.GetAttrValue("AUTHORITY", 1) != None:
+            self.epsg = int( self.proj_cs.GetAttrValue("AUTHORITY", 1) )
+            
         self.spatialunit = self.proj_cs.GetAttrValue("UNIT", 0)
         self.datum = self.proj_cs.GetAttrValue("DATUM", 0)
         self.spheroid = self.proj_cs.GetAttrValue("SPHEROID", 0)
@@ -81,11 +83,6 @@ class MjProj:
         '''
             
     def ReprojectGeom(self, geom, cs_tar):
-        #ptgeom = ShapelyPointGeom(pt)
-        #ptgeom.ShapelyToOgrGeom()
-        #print ('self.proj_cs',self.proj_cs)
-        #print ('')
-        #print ('cs_tar',cs_tar.proj_cs)
 
         transform = osr.CoordinateTransformation(self.proj_cs,cs_tar.proj_cs)
         geom.ogrGeom.Transform(transform)
@@ -185,7 +182,6 @@ class VectorLayer:
             self.fieldDefL.append(FieldDef(key,fieldDefD[key]))
                    
     def CreateOgrLayer(self,geomtype,tarLayerId):
-        #print geomtype
         self.geomtype = geomtype
         if self.geomtype.lower() == 'point':
             self.layer = self.datasource.CreateLayer(tarLayerId, self.spatialRef, geom_type=ogr.wkbPoint) 
@@ -400,7 +396,6 @@ class Geometry:
         ])
         '''
         polyL = [item for item in multipoly]
-        #print ( len(polyL) )
         self.shapelyGeom = polyL[0]
         for item in polyL:
             self.shapelyGeom.union(item)
@@ -427,6 +422,7 @@ class Geometry:
         
     def ShapelyIntersection(self, otherGeom): 
         return self.shapelyGeom.intersection(otherGeom.shapelyGeom)
+    
         
     def MultiPolyGeomFromGeomL(self,geomL):
         singlegeomL = []
@@ -497,6 +493,237 @@ class Geometry:
         for pt in ptL:
             xyL.append(transform.TransformPoint(pt[0],pt[1]))
         return xyL
+class ShapelyPointGeom(Geometry):
+    def __init__(self,pt):
+        from shapely.geometry import Point
+        Geometry.__init__(self)
+        self.shapelyGeom = Point(pt)
+        
+class ShapelyMultiPointGeom(Geometry):
+    def __init__(self,ptL):
+        from shapely.geometry import MultiPoint
+        Geometry.__init__(self)
+        self.shapelyGeom = MultiPoint(ptL)
+
+class ShapelyLineGeom(Geometry):
+    def __init__(self,ptLT):
+        from shapely.geometry import LineString
+        Geometry.__init__(self)
+        self.shapelyGeom = LineString(ptLT)
+
+class ShapelyPolyGeom(Geometry):
+    def __init__(self,ptLT):
+        from shapely.geometry import Polygon
+        Geometry.__init__(self)
+        self.shapelyGeom = Polygon(ptLT)
+             
+class RasterDataSource: 
+    def __init__(self):
+        """The constructoris just an empty container.""" 
+        
+    def OpenGDALRead(self,FPN): 
+        self.rasterFPN = FPN
+        if os.path.exists(self.rasterFPN):
+            self.datasource = gdal.Open(FPN, GA_ReadOnly)
+            if self.datasource is None:
+                exitstr = 'Exiting - Failed to open raster file %s' %(self.rasterFPN)
+                sys.exit(exitstr)
+        else:
+            exitstr = 'Raster datasource %s does not exist' %(self.rasterFPN)
+            sys.exit(exitstr)
+                                                      
+    def OpenGDALEdit(self,FPN): 
+        self.rasterFPN = FPN
+        if os.path.exists(self.rasterFPN):
+            self.datasource = gdal.Open(FPN)
+            if self.datasource is None:
+                exitstr = 'Exiting - Failed to open raster file %s' %(self.rasterFPN)
+                sys.exit(exitstr)
+        else:
+            exitstr = 'Raster datasource %s does not exist' %(self.rasterFPN)
+            sys.exit(exitstr)
+       
+    def CreateGDALraster(self,FPN,layer,of = 'GTiff'):
+        #self.datasource = gdal.GetDriverByName('GTiff').Create(FPN, x_res, y_res, 1, gdal.GDT_Byte)
+        driver = gdal.GetDriverByName( of )
+        #metadata = driver.GetMetadata()
+        #if metadata.has_key(gdal.DCAP_CREATE) \
+        #    and metadata[gdal.DCAP_CREATE] == 'YES':
+        if layer.comp.celltype.lower() in ['byte','uint8']:
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Byte )   
+            layer.comp.cellnull = int(layer.comp.cellnull) 
+        elif layer.comp.celltype.lower() == 'int16':  
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Int16 ) 
+            layer.comp.cellnull = int(layer.comp.cellnull)
+        elif layer.comp.celltype.lower() == 'uint16':
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_UInt16 )
+            layer.comp.cellnull = int(layer.comp.cellnull)
+        elif layer.comp.celltype.lower() == 'float32':
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Float32 )
+            layer.comp.cellnull = float(layer.comp.cellnull)
+        else:
+            exitstr ='numpy type not defined',layer.comp.celltype
+            sys.exit(exitstr) 
+        self.datasource.SetGeoTransform( layer.geotrans )
+        self.datasource.SetProjection( layer.projection  ) 
+        if hasattr(layer.comp,'palette') and layer.comp.palette:
+            palette = RasterPalette()
+            palette.SetTuplePalette(layer.comp.palette)
+            self.datasource.GetRasterBand(1).SetColorTable(palette.colortable) 
+        self.datasource.GetRasterBand(1).WriteArray( layer.BAND )
+        self.datasource.GetRasterBand(1).SetNoDataValue(layer.comp.cellnull)
+        '''
+            #PcR,AT,maxAT = self.FixGDALPalette(self.palette)
+            #ct = gdal.ColorTable() 
+            
+            For discrete colors
+            #ct.CreateColorRamp(0,(178,223,138),5,(255,127,0))
+            #ct.CreateColorRamp(Pcr)
+            for c in PcR:
+        
+                ct.SetColorEntry(c[0],c[1])
+        
+            #for color ramps
+            for c in range(1,len(PcR)):
+                ct.CreateColorRamp(PcR[c-1][0],PcR[c-1][1],PcR[c][0],PcR[c][1])
+            self.datasource.GetRasterBand(1).SetColorTable(ct) 
+        
+            rat = gdal.RasterAttributeTable()
+            rat.CreateColumn("Value", GFT_String, GFT_String)
+            for i in range(maxAT): 
+                rat.SetValueAsString(i, 0, AT[i])
+            self.datasource.GetRasterBand(1).SetDefaultRAT(rat)
+        '''
+        self.datasource.FlushCache()
+        self.datasource = None
+
+ 
+    def CreateGDALDS(self,FPN,layer,of = 'GTiff'):
+        #self.datasource = gdal.GetDriverByName('GTiff').Create(FPN, x_res, y_res, 1, gdal.GDT_Byte)
+        driver = gdal.GetDriverByName( of )
+        #metadata = driver.GetMetadata()
+        #if metadata.has_key(gdal.DCAP_CREATE) \
+        #    and metadata[gdal.DCAP_CREATE] == 'YES':
+        if layer.comp.celltype.lower() in ['byte','uint8']:
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Byte )   
+            layer.comp.cellnull = int(layer.comp.cellnull) 
+        elif layer.comp.celltype.lower() == 'int16':  
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Int16 ) 
+            layer.comp.cellnull = int(layer.comp.cellnull)
+        elif layer.comp.celltype.lower() == 'uint16':
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_UInt16 )
+            layer.comp.cellnull = int(layer.comp.cellnull)
+        elif layer.comp.celltype.lower() == 'float32':
+            self.datasource = driver.Create( FPN, layer.cols, layer.lins, 1, gdal.GDT_Float32 )
+            layer.comp.cellnull = float(layer.comp.cellnull)
+        else:
+            exitstr ='numpy type not defined',layer.comp.celltype
+            sys.exit(exitstr) 
+        self.datasource.SetGeoTransform( layer.geotrans )
+        self.datasource.SetProjection( layer.projection  )
+        self.datasource.GetRasterBand(1).SetNoDataValue(layer.comp.cellnull)
+        if hasattr(layer.comp,'palette') and layer.comp.palette:
+            PcR,AT,maxAT = self.FixGDALPalette(self.comp.palette)
+            ct = gdal.ColorTable() 
+            for c in range(1,len(PcR)):
+                ct.CreateColorRamp(PcR[c-1][0],PcR[c-1][1],PcR[c][0],PcR[c][1])
+            self.datasource.GetRasterBand(1).SetColorTable(ct)
+                    
+    def WriteBlock(self,col,row,arr):
+        self.datasource.GetRasterBand(1).WriteArray(arr,col, row)
+        #self.datasource.GetRasterBand(1).WriteArray
+ 
+    def arrTo2Dnp(self,layer):
+        if layer.comp.celltype.lower() in ['byte','uint8']:
+            band2DArray = np.asarray(layer.BAND, dtype=np.int8)
+        elif layer.comp.celltype.lower() == 'int16':  
+            band2DArray = np.asarray(layer.BAND, dtype=np.int16)    
+        elif layer.comp.celltype.lower() == 'uint16':
+            band2DArray = np.asarray(layer.BAND, dtype=np.uint16)
+        else:
+            ( 'print numpy type not defined',layer.comp.celltype )
+            sys.exit()   
+        #reshape the 1D array to a 2D image
+        band2DArray.shape = (-1, layer.cols)
+        layer.BAND = band2DArray
+    
+    def SetGeoTransform(self,gt): 
+        self.datasource.SetGeoTransform(gt) 
+    
+    def SetProjection(self,proj): 
+        self.datasource.SetProjection(proj)  
+            
+    def CloseDS(self):
+        #close the datasource
+        self.datasource = None
+   
+class RasterLayer:
+    def __init__(self):
+        """The constructoris just an empty container.""" 
+        
+    def SetDS(self,DS): 
+        self.datasource =  DS.datasource
+        
+    def GetLayer(self,bandnr):
+        self.layer = self.datasource.GetRasterBand(bandnr)
+        
+    def GetSpatialRef(self): 
+        self.spatialRef = self.proj_cs = self.datasource.GetProjection()
+        self.gt = self.datasource.GetGeoTransform()
+        
+        #self.spatialRef = self.proj_cs = self.layer.GetSpatialRef() 
+    def SetSpatialRef(self, tarProj):
+        self.spatialRef = tarProj.proj_cs
+        self.gt = tarProj.gt
+        
+    def GetGeometry(self): 
+        #Get the necessary band information
+        self.lins = self.datasource.RasterYSize
+        self.cols = self.datasource.RasterXSize
+        self.cellnull = self.layer.GetNoDataValue()
+        self.celltype = gdal.GetDataTypeName(self.layer.DataType)
+        self.projection = self.datasource.GetProjection()
+        self.geotrans = self.datasource.GetGeoTransform()
+
+        #Get the extent of the image
+        self.ext=[]
+        xarr=[0,self.cols]
+        yarr=[0,self.lins]
+        for px in xarr:
+            for py in yarr:
+                x=self.gt[0]+(px*self.gt[1])+(py*self.gt[2])
+                y=self.gt[3]+(px*self.gt[4])+(py*self.gt[5])
+                self.ext.append([x,y])
+            yarr.reverse()
+        self.bounds = (self.ext[0][0], self.ext[2][1], self.ext[2][0],self.ext[0][1])
+        #Get the spatial resolution
+        cellsize = [(self.ext[2][0]-self.ext[0][0])/self.cols, (self.ext[0][1]-self.ext[2][1])/self.lins] 
+        if cellsize[0] != cellsize[1]:
+            pass
+        self.cellsize = cellsize[0]
+ 
+    def ReadBand(self):
+        self.NPBAND = self.layer.ReadAsArray()
+         
+    def ReadBlock(self, col,row,ncols,nrows):
+        NPBLOCK = self.layer.ReadAsArray(col, row, ncols, nrows)
+        self.NPBLOCK = NPBLOCK.ravel()
+
+    def Flatten2DtoArr(self,structcodeD):
+        self.GetGeometry()
+        structcode  = structcodeD[self.cellType]
+
+        bandList = list(chain.from_iterable(self.NPBAND))   
+        self.bandArray = arr.array(structcode)
+        self.bandArray.fromlist(bandList)
+  
+    def ColorTable(self,colortable):
+        print ('    Setting color table (0 if success):'),
+        print ( self.layer.SetColorTable(colortable) )
+        
+    def CloseLayer(self):
+        #close the layer
+        self.layer = None
      
 def ESRICreateDSLayer(tarShpFPN,spatialRef,geomtype,layerid,fieldDefL):
     '''Creates a standard ESRI datasource and sets the layer and layerDef
@@ -516,6 +743,16 @@ def ESRICreateDSLayer(tarShpFPN,spatialRef,geomtype,layerid,fieldDefL):
         tarLayer.AddFieldDef(fieldDef)
     return tarDS, tarLayer
 
+def CreateESRIPolygonPtL(tarShpFPN, fieldDefL, ptL, proj_cs, layerid):
+    #create the datasource
+    tarDS,tarLayer = ESRICreateDSLayer(tarShpFPN, proj_cs, 'polygon', layerid, fieldDefL)
+    #create the geometry
+    geom = ShapelyPolyGeom(ptL)
+    geom.ShapelyToOgrGeom()
+    tarFeat = ogrFeature(tarLayer)
+    tarFeat.CreateOgrFeature(geom.ogrGeom, fieldDefL)
+    tarDS.CloseDS()
+
 def ESRIOpenGetLayer(srcShpFPN,mode='read'):
     '''Opens a standard ESRI datasource and gets the layer and layerDef
     '''
@@ -523,7 +760,6 @@ def ESRIOpenGetLayer(srcShpFPN,mode='read'):
     srcDS = VectorDataSource()
     #open the source data for reading
     if mode[0] == 'r':
-
         srcDS.OpenESRIshapeRead(srcShpFPN)
     else:
         srcDS.OpenESRIshapeEdit(srcShpFPN)
@@ -536,6 +772,32 @@ def ESRIOpenGetLayer(srcShpFPN,mode='read'):
     #get the spatialref
     srcLayer.GetSpatialRef()
     return srcDS,srcLayer
+
+
+
+def ESRIOpenGetLayerFieldsOLD(srcShpFPN,mode='read'):
+    '''Opens a standard ESRI datasource and gets the layer and layerDef
+    '''
+    #Create an instance of datasource for the source data
+    srcDS = VectorDataSource()
+    #open the source data for reading
+    if mode == 'read':
+        srcDS.OpenESRIshapeRead(srcShpFPN)
+    elif mode == 'edit':
+        srcDS.OpenESRIshapeEdit(srcShpFPN)
+    #create a layer instance
+    srcLayer = VectorLayer()
+    #set the datasource of the layer
+    srcLayer.SetDS(srcDS)
+    #get the layer and the fieldDefintions 
+    srcLayer.GetLayer()
+    #get the spatialref
+    srcLayer.GetSpatialRef()
+    
+    fieldDefL = srcLayer.fieldDefL
+    print ('fieldDefL',fieldDefL)
+    TESTASFA
+    return srcDS,srcLayer,fieldDefL  
 
 def CreateESRIPolygonGeom(tarShpFPN, fieldDefL, geom, proj_cs, layerid):
     #create the datasource
@@ -574,13 +836,16 @@ def CreateVectorAttributeDef(fieldDD):
      
 def ExtractFeaturesToNewDS(srcShpFPN,tarShpFPN,fieldname,valueLL,fieldDefL = False, dictL = False, key = False):
     #Open ESRI DS for reading
-    srcDS,srcLayer,srcFieldDefL = ESRIOpenGetLayer(srcShpFPN,'read')
+    srcDS,srcLayer = ESRIOpenGetLayer(srcShpFPN,'read')
     if not fieldDefL:
-        tarFieldDefL = srcFieldDefL
+        tarFieldDefL = srcLayer.srcFieldDefL
     else:
         tarFieldDefL = fieldDefL
     #Create an instance of datasource for the target
-    tarDS,tarLayer = ESRICreateDSLayer(tarShpFPN, srcLayer.proj_cs, srcLayer.geomtype, srcLayer.layerid, fieldDefL)
+    print ('srcLayer.spatialRef',srcLayer.spatialRef)
+    #tarDS,tarLayer = ESRICreateDSLayer(tarShpFPN, srcLayer.proj_cs, srcLayer.geomtype, srcLayer.layerid, fieldDefL)
+
+    tarDS,tarLayer = ESRICreateDSLayer(tarShpFPN, srcLayer.spatialRef, srcLayer.geomtype, srcLayer.layerid, fieldDefL)
     #loop over all the features in the source file        
     for feature in srcLayer.layer:
         #create an instance of feature from the srcLayer
@@ -588,10 +853,10 @@ def ExtractFeaturesToNewDS(srcShpFPN,tarShpFPN,fieldname,valueLL,fieldDefL = Fal
         #set the feature
         srcFeat.SetFeature(feature)
         #Set the fieldDef source from the source feature
-        srcFeat.AddSourceValtoFieldDef(srcFieldDefL)
+        srcFeat.AddSourceValtoFieldDef(srcLayer.fieldDefL)
         extract = False
         for valueL in valueLL:
-            for f in srcFieldDefL:
+            for f in srcLayer.fieldDefL:
                 if f.name == fieldname and f.source in valueL:
                     extract = True
                 if extract:
@@ -602,10 +867,60 @@ def ExtractFeaturesToNewDS(srcShpFPN,tarShpFPN,fieldname,valueLL,fieldDefL = Fal
     srcDS.CloseDS()
     tarDS.CloseDS()
     
+def RasterCreateWithFirstLayer(dstRastFPN,layer):
+    dstDS = RasterDataSource()
+    dstDS.CreateGDALDS(dstRastFPN,layer)
+    return dstDS
+    
+def RasterOpenGetFirstLayer(srcRastFPN,mode='read'):
+    '''Opens a standard GDAL Raster datasource and gets the first layer
+    '''
+    #Create an instance of datasource for the source data
+    srcDS = RasterDataSource()
+    #open the source data for reading    
+    if mode == 'read':
+        srcDS.OpenGDALRead(srcRastFPN)
+        #create a layer instance
+        srcLayer = RasterLayer()
+        #set the datasource of the layer
+        srcLayer.SetDS(srcDS)
+    elif mode == 'edit':
+        print (BALLE)
+        srcDS.OpenGDALEdit(srcRastFPN)
+        srcLayer = RasterLayer()
+        srcLayer.SetDS(srcDS)
+    else:
+        print ( 'Can not understand edit mode', mode )
+    srcLayer.GetLayer(1)
+    #get the spatialref
+    srcLayer.GetSpatialRef()
+    srcLayer.GetGeometry()
+    return srcDS,srcLayer 
+
+def RasterGetLayerMeta(srcRastFPN):
+    '''Opens a standard GDAL Raster datasource and get metadata for the first layer
+    '''
+    #Create an instance of datasource for the source data
+    srcDS = RasterDataSource()
+    #open the source data for reading    
+
+    srcDS.OpenGDALRead(srcRastFPN)
+    #create a layer instance
+    srcLayer = RasterLayer()
+    #set the datasource of the layer
+    srcLayer.SetDS(srcDS)
+
+    srcLayer.GetLayer(1)
+    #get the spatialref
+    srcLayer.GetSpatialRef()
+    srcLayer.GetGeometry()
+    srcDS.CloseDS()
+    return srcLayer
+
 def ImportKMLtoShape(kmlFPN,shpFPN):
     oscmd = '/Library/Frameworks/GDAL.framework/Versions/2.1/Programs/ogr2ogr -skipfailures %(dst)s %(src)s' %{'dst':shpFPN, 'src':kmlFPN}
 
-    ERRORCHECK
+    BALLE
     
 def ExportToGeoJson(srcFPN,dstFPN):
     features = []
@@ -628,8 +943,108 @@ def ExportToGeoJson(srcFPN,dstFPN):
     #with open("my_layer.crs", "w") as f:
     #    f.write(crs)
      
+def ReadRasterArray(srcRastFPN):
+    srcDS,srcLayer = RasterOpenGetFirstLayer(srcRastFPN)
+    srcLayer.ReadBand()
+    srcDS.CloseDS()
+    return srcLayer
+
+def GetRasterMetaData(srcRasterFPN): 
+
+    srcDS,srcLayer = RasterOpenGetFirstLayer(srcRasterFPN)                      
+    #srcRast = RasterDataSource()
+    spatialRef = MjProj()
+    #TGTODO HERE I ASSUME THAT RASTER PROJ IS IN WKT FORMAT
+    spatialRef.SetFromWKT(srcLayer.spatialRef)
+    spatialRef.SetProj4()
+    #spatialRef.SetProj(srcLayer.spatialRef)
+    spatialRef.ReadSpatialRef()
+    srcLayer.GetGeometry()
+    #close the layer
+    srcLayer.CloseLayer()
+    srcDS.CloseDS()
+    return spatialRef, srcLayer
+
+def GetFeatureBounds(srcShpFPN,fieldId):
+    srcDS,srcLayer = ESRIOpenGetLayer(srcShpFPN,'read')
+    boundsD = {}
+    for feature in srcLayer.layer:
+        srcFeat = ogrFeature(srcLayer)
+        srcFeat.SetFeature(feature)
+        fid = feature.GetField( str(fieldId) )
+        geom = Geometry()
+        geom.GeomFromFeature(feature)      
+        boundsD[fid] = geom.shapelyGeom.bounds
+    srcDS.CloseDS()
+    return boundsD
+
+def ReprojectBounds(bounds,cs_src,cs_tar):
+    transform = osr.CoordinateTransformation(cs_src,cs_tar)
+    ptL = []
+    for pt in bounds:
+        ptgeom = ShapelyPointGeom(pt)
+        ptgeom.ShapelyToOgrGeom()
+        #ptgeom.
+        #point = ogr.CreateGeometryFromWkt("POINT (1120351.57 741921.42)")
+        ptgeom.ogrGeom.Transform(transform)
+        ptgeom.OgrGeomToShapely()
+        ptcoord = list(ptgeom.shapelyGeom.coords)[0]
+        ptL.extend([ptcoord[0],ptcoord[1]])     
+    paramL = ['ullon','ullat','urlon','urlat','lrlon','lrlat','lllon','lllat']
+    return dict(zip(paramL,ptL))
+
+def GetFeatureAttributeList(srcShpFPN, fieldL, idfield):
+    #Get all fields
+    srcDS,srcLayer = ESRIOpenGetLayer(srcShpFPN)
+    fieldNameL = []
+    fieldD = {}
+    
+    for srcFieldDef in srcLayer.fieldDefL:
+        fieldNameL.append(srcFieldDef.name)
+    for f in fieldL:
+        if not f in fieldNameL:
+            printstr = 'the requested field %s does not exists in the file %s' %(f, srcShpFPN)
+            print ( printstr )
+            return
+    for feature in srcLayer.layer:
+        values_list = [feature.GetField(str(j)) for j in fieldL]
+        fid = feature.GetField(str(idfield))
+        fieldD[fid] = dict(zip(fieldL,values_list))
+    srcDS.CloseDS()
+    return fieldD
+
+def GetVectorProjection(srcShpFPN):
+    filetype = os.path.splitext(srcShpFPN)[1]
+    if filetype.lower() == '.shp':
+        srcDS,srcLayer = ESRIOpenGetLayer(srcShpFPN,'read')
+        srcLayer.GetSpatialRef()
+        spatialRef = MjProj()
+        if srcLayer.spatialRef != None:
+            spatialRef.SetProj(srcLayer.spatialRef)
+            spatialRef.ReadSpatialRef()
+        else:
+            spatialRef.epsg = False
+        srcDS.CloseDS()
+        return spatialRef
+    else:
+        errorstr = 'urecognized format for retrieveing spatial reference: %s' %(filetype)
+        sys.exit(errorstr)
+        
+ 
+
 if __name__ == '__main__':
 
+    srcShpFPN = '/Volumes/africa/ancillary/naturalearth/region/land/global/0/ne-110m-land_land_global_0_0.shp'
+    srcDS,srcLayer = ESRIOpenGetLayer(srcShpFPN)
+    print ('srcDS',srcDS)
+    print ('srcLayer',srcLayer.spatialRef)
+    srcProj = MjProj()
+    srcProj.SetProj(srcLayer.spatialRef)
+    srcProj.ReadSpatialRef()
+    print ('srcProj.proj_cs',srcProj.epsg)
+    print ('srcProj.proj_cs',srcProj.proj4)
+    BALLE
+    
     #Create the target file
     tarVectorFPN = '/Volumes/karttur2tb/sites/All_sites3_4326.shp'
     tarProj = MjProj()
@@ -671,9 +1086,7 @@ if __name__ == '__main__':
     count = -1
     for shpFN in shpFNL:
         count += 1
-        #if shpFN == 'ABext_LAEA.shp':
-        #    continue
-        print ('opening',shpFN)
+
         shpFPN = os.path.join(srcVectorFP,shpFN)
         srcDS,srcLayer,fieldDefL = ESRIOpenGetLayer(shpFPN)
         
@@ -708,7 +1121,6 @@ if __name__ == '__main__':
             #get the src feature
             #srcFeat.SetFeature(feature)
             geom = feature.GetGeometryRef()
-            print ('geom',geom)
             #print 'srcLayer.spatialRef.ReprojectGeom',srcLayer.spatialRef.ReprojectGeom
             geom = srcProj.ReprojectGeom(geom, tarProj.proj_cs)
             #print ('srcLayer.spatialRef',srcLayer.spatialRef)
